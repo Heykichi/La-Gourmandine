@@ -236,6 +236,10 @@ def ensure_schema():
     cursor.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS recurring_order_id INTEGER")
     cursor.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS recurring_source_date DATE")
     cursor.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER")
+    cursor.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS prenom TEXT")
+    cursor.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS nom TEXT")
+    cursor.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS commentaire TEXT")
+    cursor.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS date_commande DATE")
     cursor.execute("ALTER TABLE articles ADD COLUMN IF NOT EXISTS actif BOOLEAN")
     cursor.execute("ALTER TABLE articles ALTER COLUMN actif SET DEFAULT TRUE")
     cursor.execute("UPDATE articles SET actif = TRUE WHERE actif IS NULL")
@@ -246,6 +250,82 @@ def ensure_schema():
     cursor.execute("UPDATE order_items SET quantite = 0 WHERE quantite IS NULL")
     cursor.execute("ALTER TABLE recurring_order_items ADD COLUMN IF NOT EXISTS quantite INTEGER")
     cursor.execute("UPDATE recurring_order_items SET quantite = 0 WHERE quantite IS NULL")
+    cursor.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = 'orders' AND column_name = 'first_name'
+            ) THEN
+                EXECUTE '
+                    UPDATE orders
+                    SET prenom = COALESCE(prenom, first_name)
+                    WHERE prenom IS NULL
+                ';
+            END IF;
+        END
+        $$;
+        """
+    )
+    cursor.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = 'orders' AND column_name = 'last_name'
+            ) THEN
+                EXECUTE '
+                    UPDATE orders
+                    SET nom = COALESCE(nom, last_name)
+                    WHERE nom IS NULL
+                ';
+            END IF;
+        END
+        $$;
+        """
+    )
+    cursor.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = 'orders' AND column_name = 'comment'
+            ) THEN
+                EXECUTE '
+                    UPDATE orders
+                    SET commentaire = COALESCE(commentaire, comment)
+                    WHERE commentaire IS NULL
+                ';
+            END IF;
+        END
+        $$;
+        """
+    )
+    cursor.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = 'orders' AND column_name = 'order_date'
+            ) THEN
+                EXECUTE '
+                    UPDATE orders
+                    SET date_commande = COALESCE(date_commande, order_date)
+                    WHERE date_commande IS NULL
+                ';
+            END IF;
+        END
+        $$;
+        """
+    )
     cursor.execute(
         """
         DO $$
