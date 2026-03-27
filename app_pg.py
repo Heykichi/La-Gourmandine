@@ -65,6 +65,19 @@ st.markdown(
     }
     .article-title, .summary-title { font-weight: 700; color: #3f2414; }
     .article-title { min-height: 44px; }
+    .article-help {
+        font-size: 13px;
+        color: #6b4a35;
+        min-height: 40px;
+        margin-bottom: 0.5rem;
+    }
+    .article-qty {
+        text-align: center;
+        font-size: 30px;
+        font-weight: 700;
+        color: #3f2414;
+        margin: 0.5rem 0 0.75rem 0;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -195,6 +208,63 @@ def ensure_schema():
     """)
     cursor.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS recurring_order_id INTEGER")
     cursor.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS recurring_source_date DATE")
+    cursor.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER")
+    cursor.execute("ALTER TABLE articles ADD COLUMN IF NOT EXISTS actif BOOLEAN")
+    cursor.execute("ALTER TABLE articles ALTER COLUMN actif SET DEFAULT TRUE")
+    cursor.execute("UPDATE articles SET actif = TRUE WHERE actif IS NULL")
+    cursor.execute("ALTER TABLE order_items ADD COLUMN IF NOT EXISTS article_id INTEGER")
+    cursor.execute("ALTER TABLE order_items ADD COLUMN IF NOT EXISTS article_nom_snapshot TEXT")
+    cursor.execute("ALTER TABLE order_items ADD COLUMN IF NOT EXISTS categorie_snapshot TEXT")
+    cursor.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = 'order_items' AND column_name = 'article_nom'
+            ) THEN
+                EXECUTE '
+                    UPDATE order_items
+                    SET article_nom_snapshot = COALESCE(article_nom_snapshot, article_nom)
+                    WHERE article_nom_snapshot IS NULL
+                ';
+            END IF;
+        END
+        $$;
+        """
+    )
+    cursor.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = 'order_items' AND column_name = 'categorie'
+            ) THEN
+                EXECUTE '
+                    UPDATE order_items
+                    SET categorie_snapshot = COALESCE(categorie_snapshot, categorie)
+                    WHERE categorie_snapshot IS NULL
+                ';
+            END IF;
+        END
+        $$;
+        """
+    )
+    cursor.execute(
+        """
+        UPDATE order_items oi
+        SET article_id = a.id
+        FROM articles a
+        WHERE oi.article_id IS NULL
+          AND oi.article_nom_snapshot IS NOT NULL
+          AND oi.categorie_snapshot IS NOT NULL
+          AND a.nom = oi.article_nom_snapshot
+          AND a.categorie = oi.categorie_snapshot
+        """
+    )
     cursor.execute(
         """
         INSERT INTO users (username, password, role)
@@ -453,21 +523,21 @@ def render_order_summary(articles_dict, categories, message):
 
 
 def render_quantity_control(prefix, article_id, article_name, item_key, qty, base_qty, daily_limit):
-    input_key = f"{prefix}_qty_{article_id}"
-    if input_key not in st.session_state or st.session_state[input_key] != str(qty):
-        st.session_state[input_key] = str(qty)
     c1, c2, c3 = st.columns([1, 2, 1])
     with c1:
         if st.button("-", key=f"{prefix}_minus_{article_id}", use_container_width=True):
             set_qty(item_key, max(qty - 1, 0))
             st.rerun()
     with c2:
-        raw = st.text_input("Quantité", key=input_key, label_visibility="collapsed")
-        try:
-            new_value = max(int(raw), 0)
-        except ValueError:
-            new_value = qty
-        if raw != str(qty):
+        new_value = st.number_input(
+            "Quantité",
+            min_value=0,
+            value=qty,
+            step=1,
+            key=f"{prefix}_qty_{article_id}",
+            label_visibility="collapsed",
+        )
+        if new_value != qty:
             if daily_limit is not None and base_qty + new_value > daily_limit:
                 st.warning(f"Limite atteinte pour {article_name}.")
             else:
@@ -850,7 +920,7 @@ def show_order_editor(mode="new"):
     with left:
         active_category = st.session_state.selected_category
         st.subheader(active_category)
-        display_cols = st.columns(3)
+        display_cols = st.columns(2)
         for index, article in enumerate(articles_dict[active_category]):
             article_id = article["id"]
             article_name = article["nom"]
@@ -860,15 +930,26 @@ def show_order_editor(mode="new"):
             base_qty = get_total_already_ordered(cursor, date_commande, article_id)
             if is_edit:
                 base_qty = max(base_qty - order_items.get(article_id, 0), 0)
+
+            if daily_limit is None:
+                help_text = f"Déjà commandé : {base_qty} | Pas de limite"
+            else:
+                remaining = max(daily_limit - base_qty - qty, 0)
+                help_text = (
+                    f"Déjà commandé : {base_qty} / Limite : {daily_limit} / "
+                    f"Restant après saisie : {remaining}"
+                )
+
             with display_cols[index % len(display_cols)]:
                 st.markdown(f'<div class="article-card"><div class="article-title">{article_name}</div>', unsafe_allow_html=True)
-                st.caption(f"Base : {base_qty}" if daily_limit is None else f"Base : {base_qty} / Limite : {daily_limit}")
+                st.markdown(f'<div class="article-help">{help_text}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="article-qty">{qty}</div>', unsafe_allow_html=True)
                 render_quantity_control(mode, article_id, article_name, item_key, qty, base_qty, daily_limit)
                 st.markdown("</div>", unsafe_allow_html=True)
     with right:
         render_order_summary(articles_dict, categories, "Aucun article sélectionné pour le moment.")
 
-    if st.button("Enregistrer les modifications" if is_edit else "Enregistrer la commande", use_container_width=True):
+    if st.button("Enregistrer la commande", use_container_width=True):
         errors = []
         items_to_save = []
         if not prenom.strip():
