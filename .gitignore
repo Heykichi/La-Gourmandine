@@ -1,0 +1,6 @@
+.streamlit/secrets.toml
+.streamlit/secrets.toml.toml
+__pycache__/
+*.pyc
+.idea/
+boulangerie.db
