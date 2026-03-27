@@ -213,6 +213,42 @@ def ensure_schema():
         """,
         ("admin123", "articles", "admin"),
     )
+    cursor.execute(
+        """
+        INSERT INTO users (username, password, role)
+        SELECT %s, %s, %s
+        WHERE NOT EXISTS (
+            SELECT 1 FROM users WHERE username = %s
+        )
+        """,
+        ("magasin", "magasin123", "magasin", "magasin"),
+    )
+    cursor.execute(
+        """
+        UPDATE users
+        SET password = %s, role = %s
+        WHERE username = %s
+        """,
+        ("magasin123", "magasin", "magasin"),
+    )
+    cursor.execute(
+        """
+        INSERT INTO users (username, password, role)
+        SELECT %s, %s, %s
+        WHERE NOT EXISTS (
+            SELECT 1 FROM users WHERE username = %s
+        )
+        """,
+        ("atelier", "atelier123", "atelier", "atelier"),
+    )
+    cursor.execute(
+        """
+        UPDATE users
+        SET password = %s, role = %s
+        WHERE username = %s
+        """,
+        ("atelier123", "atelier", "atelier"),
+    )
     conn.commit()
     cursor.close()
     conn.close()
