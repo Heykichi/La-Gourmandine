@@ -19,6 +19,20 @@ CATEGORIES = [
     "Tartes",
 ]
 
+CATEGORY_ALIASES = {
+    "viennoiserie": "Viennoiseries",
+    "viennoiseries": "Viennoiseries",
+    "pistolet": "Pistolets",
+    "pistolets": "Pistolets",
+    "pain": "Pains",
+    "pains": "Pains",
+    "baguette": "Baguettes",
+    "baguettes": "Baguettes",
+    "frigo": "Frigo",
+    "tarte": "Tartes",
+    "tartes": "Tartes",
+}
+
 st.set_page_config(page_title="Boulangerie", layout="wide")
 st.markdown(
     """
@@ -119,6 +133,13 @@ def get_secret(key, default=None):
         return st.secrets[key]
     except Exception:
         return default
+
+
+def normalize_category(category):
+    cleaned = (category or "").strip()
+    if not cleaned:
+        return cleaned
+    return CATEGORY_ALIASES.get(cleaned.lower(), cleaned)
 
 
 def get_connection():
@@ -510,11 +531,12 @@ def login(username, password):
 
 
 def get_articles(cursor):
-    cursor.execute("SELECT id, nom, categorie FROM articles WHERE actif = TRUE ORDER BY categorie, nom")
+    cursor.execute("SELECT id, nom, categorie FROM articles WHERE COALESCE(actif, TRUE) = TRUE ORDER BY categorie, nom")
     rows = cursor.fetchall()
     result = {}
     for article_id, nom, categorie in rows:
-        result.setdefault(categorie, []).append({"id": article_id, "nom": nom})
+        normalized_category = normalize_category(categorie)
+        result.setdefault(normalized_category, []).append({"id": article_id, "nom": nom})
     return result
 
 
@@ -525,7 +547,7 @@ def get_all_articles(cursor):
 
 def get_article_categories(cursor):
     cursor.execute("SELECT DISTINCT categorie FROM articles ORDER BY categorie")
-    db_categories = [row[0] for row in cursor.fetchall()]
+    db_categories = [normalize_category(row[0]) for row in cursor.fetchall()]
     return CATEGORIES + [category for category in db_categories if category not in CATEGORIES]
 
 
@@ -885,9 +907,10 @@ def show_articles_page():
             if not nom.strip() or not categorie.strip():
                 st.error("Le nom et la catégorie sont obligatoires.")
             else:
+                categorie_normalisee = normalize_category(categorie)
                 cursor.execute(
                     "SELECT COUNT(*) FROM articles WHERE LOWER(nom) = LOWER(%s) AND LOWER(categorie) = LOWER(%s)",
-                    (nom.strip(), categorie.strip()),
+                    (nom.strip(), categorie_normalisee),
                 )
                 if cursor.fetchone()[0] > 0:
                     st.error("Cet article existe déjà dans cette catégorie.")
@@ -897,7 +920,7 @@ def show_articles_page():
                         INSERT INTO articles (nom, categorie, actif)
                         VALUES (%s, %s, TRUE)
                         """,
-                        (nom.strip(), categorie.strip()),
+                        (nom.strip(), categorie_normalisee),
                     )
                     conn.commit()
                     st.success("Article ajouté.")
@@ -990,7 +1013,12 @@ def show_articles_page():
                                     SET nom = %s, categorie = %s, actif = %s
                                     WHERE id = %s
                                     """,
-                                    (new_nom.strip(), new_categorie.strip(), active_value, edit_article_id),
+                                    (
+                                        new_nom.strip(),
+                                        normalize_category(new_categorie),
+                                        active_value,
+                                        edit_article_id,
+                                    ),
                                 )
                                 conn.commit()
                                 st.session_state.edit_article_id = None
@@ -1018,14 +1046,7 @@ def show_order_editor(mode="new"):
     conn = get_connection()
     cursor = conn.cursor()
     articles_dict = get_articles(cursor)
-    categories = [category for category in CATEGORIES if category in articles_dict] + [
-        category for category in articles_dict.keys() if category not in CATEGORIES
-    ]
-    if not categories:
-        st.warning("Aucun article actif n'est disponible.")
-        cursor.close()
-        conn.close()
-        return
+    categories = CATEGORIES + [category for category in articles_dict.keys() if category not in CATEGORIES]
     ensure_order_quantities(articles_dict)
     if st.session_state.selected_category not in categories:
         st.session_state.selected_category = categories[0]
