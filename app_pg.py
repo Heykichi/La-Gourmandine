@@ -10,6 +10,15 @@ from reportlab.pdfgen import canvas
 
 LOGO_PATH = Path(__file__).with_name("pain.png")
 
+CATEGORIES = [
+    "Viennoiseries",
+    "Pistolets",
+    "Pains",
+    "Baguettes",
+    "Frigo",
+    "Tartes",
+]
+
 st.set_page_config(page_title="Boulangerie", layout="wide")
 st.markdown(
     """
@@ -42,7 +51,7 @@ st.markdown(
     .stTextInput label, .stTextArea label, .stDateInput label, .stNumberInput label {
         color: #000000 !important;
     }
-    .hero-card, .block-card, .article-card, .summary-card {
+    .hero-card, .block-card, .article-card, .summary-card, .summary-box {
         border-radius: 18px;
         border: 1px solid #ba8d69;
         box-shadow: 0 8px 20px rgba(70, 40, 20, 0.09);
@@ -57,14 +66,25 @@ st.markdown(
         background: #fff8ef;
         margin-bottom: 1rem;
     }
+    .article-card {
+        min-height: 220px;
+    }
     .summary-card {
         padding: 1rem;
         background: linear-gradient(180deg, #f3e2d0 0%, #e6c8a8 100%);
         position: sticky;
         top: 1rem;
     }
+    .summary-box {
+        padding: 16px;
+        background: #fcfcfc;
+    }
     .article-title, .summary-title { font-weight: 700; color: #3f2414; }
-    .article-title { min-height: 44px; }
+    .article-title {
+        min-height: 44px;
+        font-size: 24px;
+        margin-bottom: 10px;
+    }
     .article-help {
         font-size: 13px;
         color: #6b4a35;
@@ -77,6 +97,13 @@ st.markdown(
         font-weight: 700;
         color: #3f2414;
         margin: 0.5rem 0 0.75rem 0;
+    }
+    .block-title {
+        font-size: 20px;
+        font-weight: 700;
+        margin-top: 10px;
+        margin-bottom: 8px;
+        color: #3f2414;
     }
     </style>
     """,
@@ -418,7 +445,8 @@ def get_all_articles(cursor):
 
 def get_article_categories(cursor):
     cursor.execute("SELECT DISTINCT categorie FROM articles ORDER BY categorie")
-    return [row[0] for row in cursor.fetchall()]
+    db_categories = [row[0] for row in cursor.fetchall()]
+    return CATEGORIES + [category for category in db_categories if category not in CATEGORIES]
 
 
 def article_is_referenced(cursor, article_id):
@@ -550,8 +578,9 @@ def show_logo(width=260):
 
 
 def render_order_summary(articles_dict, categories, message):
-    st.markdown('<div class="summary-card">', unsafe_allow_html=True)
-    st.markdown('<div class="summary-title">Résumé de la commande</div>', unsafe_allow_html=True)
+    st.markdown('<div class="summary-box">', unsafe_allow_html=True)
+    st.markdown('<div class="block-title">Résumé</div>', unsafe_allow_html=True)
+    has_items = False
     total = 0
     for categorie in categories:
         lines = []
@@ -561,10 +590,11 @@ def render_order_summary(articles_dict, categories, message):
                 lines.append((article["nom"], qty))
                 total += qty
         if lines:
+            has_items = True
             st.write(f"**{categorie}**")
             for article_name, qty in lines:
-                st.write(f"{article_name} : {qty}")
-    if total == 0:
+                st.write(f"- {article_name} : {qty}")
+    if not has_items:
         st.info(message)
     st.write(f"**Total pièces : {total}**")
     st.markdown("</div>", unsafe_allow_html=True)
@@ -770,10 +800,7 @@ def show_articles_page():
 
     with st.expander("Ajouter un article", expanded=True):
         nom = st.text_input("Nom de l'article", key="new_article_name")
-        if categories:
-            categorie = st.selectbox("Catégorie", options=categories, key="new_article_category")
-        else:
-            categorie = st.text_input("Catégorie", key="new_article_category")
+        categorie = st.selectbox("Catégorie", options=categories, key="new_article_category")
         if st.button("Ajouter l'article", use_container_width=True):
             if not nom.strip() or not categorie.strip():
                 st.error("Le nom et la catégorie sont obligatoires.")
@@ -911,7 +938,9 @@ def show_order_editor(mode="new"):
     conn = get_connection()
     cursor = conn.cursor()
     articles_dict = get_articles(cursor)
-    categories = list(articles_dict.keys())
+    categories = [category for category in CATEGORIES if category in articles_dict] + [
+        category for category in articles_dict.keys() if category not in CATEGORIES
+    ]
     if not categories:
         st.warning("Aucun article actif n'est disponible.")
         cursor.close()
@@ -938,25 +967,33 @@ def show_order_editor(mode="new"):
     else:
         prenom_default, nom_default, date_default, commentaire_default = "", "", date.today(), ""
 
-    t1, t2 = st.columns(2)
-    with t1:
-        if st.button("Retour", use_container_width=True):
+    top1, top2 = st.columns([1, 1])
+    with top1:
+        if st.button("Retour à l'accueil" if not is_edit else "Retour aux commandes", use_container_width=True):
             if is_edit:
                 st.session_state.edit_order_id = None
                 st.session_state.pop(f"edit_loaded_{order_id}", None)
                 go_to_page("voir_commandes")
             go_to_page("accueil")
+    with top2:
+        if st.button("Réinitialiser les quantités" if not is_edit else "Recharger la commande", use_container_width=True):
+            if is_edit:
+                load_order_into_session(articles_dict, order_items)
+            else:
+                reset_order_quantities(articles_dict)
+            st.rerun()
 
     c1, c2 = st.columns(2)
     with c1:
         prenom = st.text_input("Prénom", value=prenom_default, key=f"{mode}_prenom")
     with c2:
         nom = st.text_input("Nom", value=nom_default, key=f"{mode}_nom")
-    date_commande = st.date_input("Date de la commande", value=date_default, key=f"{mode}_date")
+    date_commande = st.date_input("Date", value=date_default, key=f"{mode}_date")
     commentaire = st.text_area("Commentaire", value=commentaire_default or "", key=f"{mode}_commentaire")
     if not is_edit:
         ensure_recurring_orders_materialized(date_commande)
 
+    st.subheader("Choisir une catégorie")
     cat_cols = st.columns(min(len(categories), 5))
     for index, categorie in enumerate(categories):
         with cat_cols[index % len(cat_cols)]:
@@ -964,12 +1001,16 @@ def show_order_editor(mode="new"):
                 st.session_state.selected_category = categorie
                 st.rerun()
 
+    st.divider()
     left, right = st.columns([3, 1])
     with left:
         active_category = st.session_state.selected_category
         st.subheader(active_category)
+        articles = articles_dict.get(active_category, [])
+        if not articles:
+            st.info("Aucun article dans cette catégorie.")
         display_cols = st.columns(2)
-        for index, article in enumerate(articles_dict[active_category]):
+        for index, article in enumerate(articles):
             article_id = article["id"]
             article_name = article["nom"]
             item_key = f"{active_category}|{article_id}"
@@ -997,7 +1038,7 @@ def show_order_editor(mode="new"):
     with right:
         render_order_summary(articles_dict, categories, "Aucun article sélectionné pour le moment.")
 
-    if st.button("Enregistrer la commande", use_container_width=True):
+    if st.button("Enregistrer la commande", key=f"{mode}_save_order", use_container_width=True):
         errors = []
         items_to_save = []
         if not prenom.strip():
