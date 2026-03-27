@@ -215,6 +215,10 @@ def ensure_schema():
     cursor.execute("ALTER TABLE order_items ADD COLUMN IF NOT EXISTS article_id INTEGER")
     cursor.execute("ALTER TABLE order_items ADD COLUMN IF NOT EXISTS article_nom_snapshot TEXT")
     cursor.execute("ALTER TABLE order_items ADD COLUMN IF NOT EXISTS categorie_snapshot TEXT")
+    cursor.execute("ALTER TABLE order_items ADD COLUMN IF NOT EXISTS quantite INTEGER")
+    cursor.execute("UPDATE order_items SET quantite = 0 WHERE quantite IS NULL")
+    cursor.execute("ALTER TABLE recurring_order_items ADD COLUMN IF NOT EXISTS quantite INTEGER")
+    cursor.execute("UPDATE recurring_order_items SET quantite = 0 WHERE quantite IS NULL")
     cursor.execute(
         """
         DO $$
@@ -247,6 +251,50 @@ def ensure_schema():
                     UPDATE order_items
                     SET categorie_snapshot = COALESCE(categorie_snapshot, categorie)
                     WHERE categorie_snapshot IS NULL
+                ';
+            END IF;
+        END
+        $$;
+        """
+    )
+    cursor.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = 'order_items' AND column_name = 'quantity'
+            ) THEN
+                EXECUTE '
+                    UPDATE order_items
+                    SET quantite = CASE
+                        WHEN quantite IS NULL OR quantite = 0 THEN quantity
+                        ELSE quantite
+                    END
+                    WHERE quantite IS NULL OR quantite = 0
+                ';
+            END IF;
+        END
+        $$;
+        """
+    )
+    cursor.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = 'recurring_order_items' AND column_name = 'quantity'
+            ) THEN
+                EXECUTE '
+                    UPDATE recurring_order_items
+                    SET quantite = CASE
+                        WHEN quantite IS NULL OR quantite = 0 THEN quantity
+                        ELSE quantite
+                    END
+                    WHERE quantite IS NULL OR quantite = 0
                 ';
             END IF;
         END
