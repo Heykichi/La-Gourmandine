@@ -4,3 +4,8 @@ __pycache__/
 *.pyc
 .idea/
 boulangerie.db
+*.db
+*.zip
+*.lnk
+launch_app.bat
+launch_app.vbs
